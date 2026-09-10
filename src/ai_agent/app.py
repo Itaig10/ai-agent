@@ -97,3 +97,8 @@ class AgentApp(App[None]):
         chat = self.query_one("#chat", RichLog)
         chat.clear()
         chat.write("[bold cyan]Conversation cleared.[/bold cyan]")
+
+    async def on_unmount(self) -> None:
+        close = getattr(self.session.provider, "close", None)
+        if close is not None:
+            await close()

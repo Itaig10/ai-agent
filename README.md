@@ -1,17 +1,20 @@
 # AI Agent TUI
 
-A provider-agnostic terminal chat application written in Python. The first
-provider uses the OpenAI Responses API; the architecture is designed so a
-LiteLLM provider can be added later without changing the TUI or conversation
-logic.
+A provider-agnostic terminal chat application written in Python. It uses your
+local ChatGPT-authenticated Codex installation by default, with an optional
+direct OpenAI Responses API provider. The architecture is designed so a LiteLLM
+provider can be added later without changing the TUI or conversation logic.
 
 ## Requirements
 
 - Python 3.11 or newer
-- An OpenAI API key
+- Codex installed and authenticated with ChatGPT
 
-A ChatGPT subscription and an OpenAI API account are separate. Create an API
-key in the OpenAI Platform and keep it out of Git.
+Check the local Codex login:
+
+```bash
+codex login status
+```
 
 ## Setup
 
@@ -19,14 +22,15 @@ key in the OpenAI Platform and keep it out of Git.
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -e .
-export OPENAI_API_KEY="your-api-key"
 ```
 
-Optionally choose a model or provider:
+Codex uses the account-default model unless `AI_AGENT_MODEL` is set. To use the
+direct OpenAI API instead:
 
 ```bash
-export AI_AGENT_MODEL="gpt-5.5"
 export AI_AGENT_PROVIDER="openai"
+export AI_AGENT_MODEL="gpt-5.5"
+export OPENAI_API_KEY="your-api-key"
 ```
 
 Run the application:
@@ -49,9 +53,11 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 ## Architecture
 
 ```text
-TUI -> ChatSession -> ChatProvider -> OpenAI Responses API
-                              `----> LiteLLM (future adapter)
+TUI -> ChatSession -> ChatProvider -> Codex app server (default)
+                         |-------> OpenAI Responses API
+                         `-------> LiteLLM (future adapter)
 ```
 
 Provider implementations live in `src/ai_agent/providers/`. A provider only
-needs to implement the `ChatProvider` protocol.
+needs to implement the `ChatProvider` protocol. The Codex provider creates an
+ephemeral session with a read-only sandbox and no command approvals.
