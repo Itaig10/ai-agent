@@ -16,6 +16,7 @@ def make_settings(**changes: object) -> Settings:
         openai_api_key=None,
         litellm_api_key=None,
         litellm_api_base=None,
+        litellm_timeout_seconds=2.0,
         context_window=None,
         codex_path="codex-custom",
     )
@@ -75,6 +76,7 @@ class ProviderFactoryTests(unittest.TestCase):
             effort="medium",
             api_key="proxy-key",
             api_base="https://proxy.example.test",
+            timeout_seconds=2.0,
             context_window=200_000,
         )
 

@@ -48,7 +48,13 @@ export ANTHROPIC_API_KEY="your-api-key"
 For a custom endpoint or LiteLLM proxy, optionally set
 `AI_AGENT_LITELLM_API_BASE` and `AI_AGENT_LITELLM_API_KEY`. Set
 `AI_AGENT_CONTEXT_WINDOW` to the selected model's context size to enable the
-context percentage in the status bar.
+context percentage in the status bar. LiteLLM requests time out after 2 seconds
+by default; change this with `AI_AGENT_LITELLM_TIMEOUT_SECONDS`. The bundled
+LiteLLM model-cost map is used so startup does not wait on a metadata URL.
+When a LiteLLM proxy URL is configured, the app also fetches its available models
+from `GET /models` in the background. Start typing in the model field to accept a
+matching model, or use `/models` to list the cached results and `/models refresh`
+to fetch them again.
 
 Run the application:
 

@@ -1,11 +1,60 @@
+import os
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from ai_agent.messages import ChatMessage
-from ai_agent.providers.litellm import LiteLLMProvider
+from ai_agent.providers.litellm import (
+    LiteLLMProvider,
+    _fetch_litellm_models_sync,
+    fetch_litellm_models,
+)
 
 
 class LiteLLMProviderTests(unittest.IsolatedAsyncioTestCase):
+    def test_model_discovery_uses_proxy_api_auth_and_timeout(self) -> None:
+        payload = (
+            b'{"object":"list","data":['
+            b'{"id":"zeta"},{"id":"alpha"},{"id":"alpha"},'
+            b'{"object":"model"}]}'
+        )
+        with patch("ai_agent.providers.litellm.urlopen") as open_url:
+            response = open_url.return_value.__enter__.return_value
+            response.read.return_value = payload
+
+            models = _fetch_litellm_models_sync(
+                "https://proxy.example.test/v1/models",
+                "proxy-key",
+                2,
+            )
+
+        self.assertEqual(models, ("alpha", "zeta"))
+        request = open_url.call_args.args[0]
+        self.assertEqual(
+            request.full_url,
+            "https://proxy.example.test/v1/models",
+        )
+        self.assertEqual(request.headers["Authorization"], "Bearer proxy-key")
+        self.assertEqual(open_url.call_args.kwargs["timeout"], 2)
+
+    async def test_model_discovery_validates_url(self) -> None:
+        with self.assertRaisesRegex(ValueError, "API_BASE"):
+            await fetch_litellm_models(api_base=None)
+        with self.assertRaisesRegex(ValueError, "http or https"):
+            await fetch_litellm_models(api_base="file:///tmp/models.json")
+
+    def test_model_discovery_rejects_invalid_response(self) -> None:
+        with patch("ai_agent.providers.litellm.urlopen") as open_url:
+            response = open_url.return_value.__enter__.return_value
+            response.read.return_value = b'{"models": []}'
+
+            with self.assertRaisesRegex(RuntimeError, "data array"):
+                _fetch_litellm_models_sync(
+                    "https://proxy.example.test/models",
+                    None,
+                    2,
+                )
+
     async def test_completion_uses_unified_chat_format(self) -> None:
         received = {}
 
@@ -25,6 +74,7 @@ class LiteLLMProviderTests(unittest.IsolatedAsyncioTestCase):
             effort="high",
             api_key="test-key",
             api_base="https://example.test",
+            timeout_seconds=2.5,
             context_window=1000,
             completion_function=complete,
         )
@@ -38,6 +88,7 @@ class LiteLLMProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(received["reasoning_effort"], "high")
         self.assertEqual(received["api_key"], "test-key")
         self.assertEqual(received["api_base"], "https://example.test")
+        self.assertEqual(received["timeout"], 2.5)
         self.assertEqual(
             received["messages"],
             [{"role": "user", "content": "Hello"}],
@@ -119,6 +170,29 @@ class LiteLLMProviderTests(unittest.IsolatedAsyncioTestCase):
                 effort="extreme",
                 completion_function=complete,
             )
+        with self.assertRaisesRegex(ValueError, "timeout must be"):
+            LiteLLMProvider(
+                model="openai/example",
+                timeout_seconds=0,
+                completion_function=complete,
+            )
+
+    def test_loading_litellm_uses_local_cost_map(self) -> None:
+        async def complete(**_request: object) -> object:
+            return {}
+
+        module = SimpleNamespace(acompletion=complete)
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "ai_agent.providers.litellm.importlib.import_module",
+                return_value=module,
+            ),
+        ):
+            loaded = LiteLLMProvider._load_completion()
+            self.assertEqual(os.environ["LITELLM_LOCAL_MODEL_COST_MAP"], "True")
+
+        self.assertIs(loaded, complete)
 
     async def test_streaming_and_cost_metrics(self) -> None:
         deltas: list[str] = []

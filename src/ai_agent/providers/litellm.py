@@ -1,7 +1,13 @@
+import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 import importlib
+import json
+import math
+import os
 from time import monotonic
 from typing import Any
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 from ai_agent.events import TextDelta
 from ai_agent.messages import ChatMessage
@@ -10,6 +16,62 @@ from ai_agent.metrics import UsageMetrics
 
 CompletionFunction = Callable[..., Awaitable[Any]]
 TextDeltaHandler = Callable[[TextDelta], Awaitable[None]]
+MAX_MODEL_LIST_BYTES = 2 * 1024 * 1024
+
+
+async def fetch_litellm_models(
+    *,
+    api_base: str | None,
+    api_key: str | None = None,
+    timeout_seconds: float = 2.0,
+) -> tuple[str, ...]:
+    """Fetch model IDs exposed by a configured LiteLLM proxy."""
+    if not api_base or not api_base.strip():
+        raise ValueError(
+            "AI_AGENT_LITELLM_API_BASE is required to discover LiteLLM models"
+        )
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("LiteLLM timeout must be greater than zero")
+
+    base = api_base.strip().rstrip("/")
+    if urlsplit(base).scheme not in {"http", "https"}:
+        raise ValueError("AI_AGENT_LITELLM_API_BASE must use http or https")
+    return await asyncio.to_thread(
+        _fetch_litellm_models_sync,
+        f"{base}/models",
+        api_key,
+        timeout_seconds,
+    )
+
+
+def _fetch_litellm_models_sync(
+    url: str,
+    api_key: str | None,
+    timeout_seconds: float,
+) -> tuple[str, ...]:
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = Request(url, headers=headers, method="GET")
+    with urlopen(request, timeout=timeout_seconds) as response:
+        raw = response.read(MAX_MODEL_LIST_BYTES + 1)
+    if len(raw) > MAX_MODEL_LIST_BYTES:
+        raise RuntimeError("LiteLLM model list exceeded the 2 MiB limit")
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("LiteLLM returned an invalid model list") from error
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, list):
+        raise RuntimeError("LiteLLM model list is missing the data array")
+    model_ids = {
+        model_id.strip()
+        for item in data
+        if isinstance(item, dict)
+        and isinstance((model_id := item.get("id")), str)
+        and model_id.strip()
+    }
+    return tuple(sorted(model_ids, key=str.casefold))
 
 
 class LiteLLMProvider:
@@ -24,6 +86,7 @@ class LiteLLMProvider:
         effort: str | None = None,
         api_key: str | None = None,
         api_base: str | None = None,
+        timeout_seconds: float = 2.0,
         context_window: int | None = None,
         completion_function: CompletionFunction | None = None,
         text_delta_handler: TextDeltaHandler | None = None,
@@ -32,11 +95,14 @@ class LiteLLMProvider:
             raise ValueError("AI_AGENT_MODEL is required for the LiteLLM provider")
         if context_window is not None and context_window <= 0:
             raise ValueError("AI_AGENT_CONTEXT_WINDOW must be greater than zero")
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("LiteLLM timeout must be greater than zero")
 
         self.model = model.strip()
         self.effort = self._validate_effort(effort)
         self.api_key = api_key
         self.api_base = api_base
+        self.timeout_seconds = timeout_seconds
         self.context_window = context_window
         self.context_tokens = 0
         self.context_window_supported = context_window is not None
@@ -53,6 +119,7 @@ class LiteLLMProvider:
                 {"role": message.role, "content": message.content}
                 for message in messages
             ],
+            "timeout": self.timeout_seconds,
         }
         if self.effort:
             request["reasoning_effort"] = self.effort
@@ -147,6 +214,9 @@ class LiteLLMProvider:
 
     @staticmethod
     def _load_completion() -> CompletionFunction:
+        # LiteLLM otherwise downloads its model-cost map during import. Use the
+        # bundled map so a slow or unavailable URL cannot delay app startup.
+        os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
         try:
             module = importlib.import_module("litellm")
         except ImportError as error:

@@ -4,7 +4,7 @@ import os
 import re
 import shlex
 import signal
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +14,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
+from textual.suggester import SuggestFromList
 from textual.widgets import (
     Button,
     Collapsible,
@@ -71,6 +72,7 @@ from ai_agent.tools import ToolRegistry
 
 
 ProviderFactory = Callable[[str, str | None], ChatProvider]
+ModelFetcher = Callable[[str], Awaitable[Sequence[str]]]
 
 
 class ApprovalScreen(ModalScreen[str]):
@@ -305,6 +307,7 @@ class AgentApp(App[None]):
         session: ChatSession,
         *,
         provider_factory: ProviderFactory | None = None,
+        model_fetcher: ModelFetcher | None = None,
         tool_registry: ToolRegistry | None = None,
         conversation_store: ConversationStore | None = None,
         checkpoint_store: CheckpointStore | None = None,
@@ -320,6 +323,8 @@ class AgentApp(App[None]):
         super().__init__()
         self.session = session
         self.provider_factory = provider_factory
+        self.model_fetcher = model_fetcher
+        self._available_models: dict[str, tuple[str, ...]] = {}
         self.tool_registry = (
             tool_registry
             or getattr(session.provider, "tool_registry", None)
@@ -483,6 +488,11 @@ class AgentApp(App[None]):
             "[dim]Approvals and background-job results appear here.[/dim]"
         )
         self.query_one("#prompt", Input).focus()
+        if (
+            self.model_fetcher is not None
+            and self.session.provider.name == "litellm"
+        ):
+            self.fetch_models(self.session.provider.name)
         active_goal = self.goal_store.active()
         if active_goal is not None:
             if active_goal.remaining_seconds <= 0:
@@ -557,6 +567,8 @@ class AgentApp(App[None]):
             "/load ",
             "/metrics",
             "/model ",
+            "/models",
+            "/models refresh",
             "/notifications",
             "/patch apply",
             "/patch discard",
@@ -982,6 +994,81 @@ class AgentApp(App[None]):
     def action_focus_model(self) -> None:
         self.query_one("#model", Input).focus()
 
+    @on(Select.Changed, "#provider")
+    def discover_selected_provider_models(self, event: Select.Changed) -> None:
+        provider_name = str(event.value)
+        cached = self._available_models.get(provider_name)
+        if cached is not None:
+            self._apply_model_suggestions(provider_name, cached)
+        elif self.model_fetcher is not None and provider_name == "litellm":
+            self.fetch_models(provider_name)
+
+    @work(exclusive=True, group="model-discovery")
+    async def fetch_models(self, provider_name: str, *, announce: bool = False) -> None:
+        await self._discover_models(provider_name, announce=announce)
+
+    async def _discover_models(
+        self,
+        provider_name: str,
+        *,
+        announce: bool,
+    ) -> tuple[str, ...]:
+        if self.model_fetcher is None:
+            if announce:
+                self._write_system("Model discovery is unavailable in this embedding.")
+            return ()
+        model_input = self.query_one("#model", Input)
+        if str(self.query_one("#provider", Select).value) == provider_name:
+            model_input.placeholder = "fetching available models…"
+        try:
+            fetched = await self.model_fetcher(provider_name)
+            models = tuple(
+                sorted(
+                    {
+                        model.strip()
+                        for model in fetched
+                        if isinstance(model, str) and model.strip()
+                    },
+                    key=str.casefold,
+                )
+            )
+        except Exception as error:
+            if str(self.query_one("#provider", Select).value) == provider_name:
+                model_input.placeholder = "enter model name"
+            message = f"Could not fetch {provider_name} models: {error}"
+            self._record_notification(
+                NotificationEvent("Model discovery failed", message, "warning")
+            )
+            if announce:
+                self._write_system(message, error=True)
+            return ()
+
+        self._available_models[provider_name] = models
+        self._apply_model_suggestions(provider_name, models)
+        if announce:
+            report = "\n".join(models) if models else "No models were returned."
+            self._write_system(
+                f"Available {provider_name} models ({len(models)}):\n{report}"
+            )
+        elif models:
+            self.notify(f"Discovered {len(models)} {provider_name} model(s)")
+        return models
+
+    def _apply_model_suggestions(
+        self,
+        provider_name: str,
+        models: Sequence[str],
+    ) -> None:
+        if str(self.query_one("#provider", Select).value) != provider_name:
+            return
+        model_input = self.query_one("#model", Input)
+        model_input.suggester = SuggestFromList(models, case_sensitive=False)
+        model_input.placeholder = (
+            f"type to match {len(models)} available model(s)"
+            if models
+            else "enter model name"
+        )
+
     @on(Button.Pressed, "#switch-provider")
     async def switch_provider_from_controls(self) -> None:
         provider = str(self.query_one("#provider", Select).value)
@@ -1047,7 +1134,8 @@ class AgentApp(App[None]):
             if command == "/help":
                 self._write_system(
                     "/save NAME · /load NAME · /sessions · "
-                    "/provider NAME [MODEL] · /model MODEL · /tools · "
+                    "/provider NAME [MODEL] · /model MODEL · /models [refresh] · "
+                    "/tools · "
                     "/tool enable|disable NAME · /metrics · "
                     "/plan · /diff · /undo · /checkpoints · /restore NAME · "
                     "/patch preview FILE|apply|discard|status · "
@@ -1106,6 +1194,18 @@ class AgentApp(App[None]):
                     if len(args) != 1:
                         raise ValueError("Usage: /model MODEL")
                     await self._switch_provider(self.session.provider.name, args[0])
+            elif command == "/models":
+                if args not in ([], ["refresh"]):
+                    raise ValueError("Usage: /models [refresh]")
+                provider_name = str(self.query_one("#provider", Select).value)
+                cached = self._available_models.get(provider_name)
+                if cached is not None and not args:
+                    report = "\n".join(cached) if cached else "No models were returned."
+                    self._write_system(
+                        f"Available {provider_name} models ({len(cached)}):\n{report}"
+                    )
+                else:
+                    await self._discover_models(provider_name, announce=True)
             elif command == "/tools":
                 self._show_tool_registry()
             elif command == "/permissions":

@@ -15,6 +15,7 @@ class SettingsTests(unittest.TestCase):
         self.assertIsNone(settings.model)
         self.assertIsNone(settings.effort)
         self.assertIsNone(settings.context_window)
+        self.assertEqual(settings.litellm_timeout_seconds, 2.0)
         self.assertEqual(settings.codex_path, "codex")
 
     @patch("ai_agent.config.load_dotenv")
@@ -26,6 +27,7 @@ class SettingsTests(unittest.TestCase):
             "AI_AGENT_CONTEXT_WINDOW": "128000",
             "AI_AGENT_LITELLM_API_KEY": "proxy-key",
             "AI_AGENT_LITELLM_API_BASE": "https://proxy.example.test",
+            "AI_AGENT_LITELLM_TIMEOUT_SECONDS": "2.5",
             "OPENAI_API_KEY": "openai-key",
             "CODEX_PATH": "/opt/codex",
         }
@@ -37,6 +39,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.effort, "high")
         self.assertEqual(settings.context_window, 128_000)
         self.assertEqual(settings.litellm_api_key, "proxy-key")
+        self.assertEqual(settings.litellm_timeout_seconds, 2.5)
         self.assertEqual(settings.openai_api_key, "openai-key")
         self.assertEqual(settings.codex_path, "/opt/codex")
 
@@ -56,6 +59,18 @@ class SettingsTests(unittest.TestCase):
                     clear=True,
                 ):
                     with self.assertRaisesRegex(ValueError, "CONTEXT_WINDOW"):
+                        Settings.from_env()
+
+    @patch("ai_agent.config.load_dotenv")
+    def test_invalid_litellm_timeouts_are_rejected(self, _load: object) -> None:
+        for value in ("many", "0", "-1", "nan", "inf"):
+            with self.subTest(value=value):
+                with patch.dict(
+                    os.environ,
+                    {"AI_AGENT_LITELLM_TIMEOUT_SECONDS": value},
+                    clear=True,
+                ):
+                    with self.assertRaisesRegex(ValueError, "LITELLM_TIMEOUT"):
                         Settings.from_env()
 
 

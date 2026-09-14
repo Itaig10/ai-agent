@@ -468,6 +468,58 @@ class AgentAppTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.session.provider.model, "new-model")
             self.assertEqual(app.query_one("#provider", Select).value, "openai")
 
+    async def test_litellm_models_are_discovered_in_background(self) -> None:
+        provider = FakeInteractiveProvider()
+        provider.name = "litellm"
+        provider.model = "model-b"
+        fetched = asyncio.Event()
+
+        async def fetch_models(provider_name: str) -> tuple[str, ...]:
+            self.assertEqual(provider_name, "litellm")
+            fetched.set()
+            return ("model-b", "model-a", "model-b")
+
+        app = AgentApp(
+            ChatSession(provider),
+            model_fetcher=fetch_models,
+        )
+        async with app.run_test(size=(120, 40)) as pilot:
+            await asyncio.wait_for(fetched.wait(), timeout=1)
+            await pilot.pause()
+
+            self.assertEqual(
+                app._available_models["litellm"],
+                ("model-a", "model-b"),
+            )
+            model_input = app.query_one("#model", Input)
+            self.assertIn("2 available", model_input.placeholder)
+            self.assertEqual(
+                await model_input.suggester.get_suggestion("model-a"),
+                "model-a",
+            )
+
+    async def test_models_command_uses_cached_discovery(self) -> None:
+        provider = FakeInteractiveProvider()
+        provider.name = "litellm"
+        calls = 0
+
+        async def fetch_models(_provider_name: str) -> tuple[str, ...]:
+            nonlocal calls
+            calls += 1
+            return ("first-model", "second-model")
+
+        app = AgentApp(
+            ChatSession(provider),
+            model_fetcher=fetch_models,
+        )
+        async with app.run_test(size=(120, 40)) as pilot:
+            await app._discover_models("litellm", announce=False)
+            calls_after_discovery = calls
+            await app._handle_command("/models")
+            await pilot.pause()
+
+            self.assertEqual(calls, calls_after_discovery)
+
     async def test_provider_switch_closes_previous_provider(self) -> None:
         original = ClosableProvider()
         replacement = ClosableProvider()
