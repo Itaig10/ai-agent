@@ -9,6 +9,7 @@ description = "A provider-agnostic AI agent terminal interface"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "litellm>=1.80.0,<2",
   "openai>=1.68.0",
   "python-dotenv>=1.0.1",
   "textual>=2.1.2",

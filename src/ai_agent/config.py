@@ -10,7 +10,11 @@ class Settings:
 
     provider: str
     model: str | None
+    effort: str | None
     openai_api_key: str | None
+    litellm_api_key: str | None
+    litellm_api_base: str | None
+    context_window: int | None
     codex_path: str
 
     @classmethod
@@ -18,12 +22,28 @@ class Settings:
         load_dotenv()
         provider = os.getenv("AI_AGENT_PROVIDER", "codex").strip().lower()
         model = os.getenv("AI_AGENT_MODEL", "").strip() or None
+        effort = os.getenv("AI_AGENT_EFFORT", "").strip().lower() or None
+        context_window_text = os.getenv("AI_AGENT_CONTEXT_WINDOW", "").strip()
 
         if not provider:
             raise ValueError("AI_AGENT_PROVIDER cannot be empty")
+        if effort not in {None, "low", "medium", "high", "xhigh"}:
+            raise ValueError(
+                "AI_AGENT_EFFORT must be low, medium, high, or xhigh"
+            )
+        try:
+            context_window = int(context_window_text) if context_window_text else None
+        except ValueError as error:
+            raise ValueError("AI_AGENT_CONTEXT_WINDOW must be an integer") from error
+        if context_window is not None and context_window <= 0:
+            raise ValueError("AI_AGENT_CONTEXT_WINDOW must be greater than zero")
         return cls(
             provider=provider,
             model=model,
+            effort=effort,
             openai_api_key=os.getenv("OPENAI_API_KEY"),
+            litellm_api_key=os.getenv("AI_AGENT_LITELLM_API_KEY"),
+            litellm_api_base=os.getenv("AI_AGENT_LITELLM_API_BASE"),
+            context_window=context_window,
             codex_path=os.getenv("CODEX_PATH", "codex").strip() or "codex",
         )
