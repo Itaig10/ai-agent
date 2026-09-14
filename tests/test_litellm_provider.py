@@ -26,6 +26,7 @@ class LiteLLMProviderTests(unittest.IsolatedAsyncioTestCase):
                 "https://proxy.example.test/v1/models",
                 "proxy-key",
                 2,
+                False,
             )
 
         self.assertEqual(models, ("alpha", "zeta"))
@@ -36,6 +37,9 @@ class LiteLLMProviderTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(request.headers["Authorization"], "Bearer proxy-key")
         self.assertEqual(open_url.call_args.kwargs["timeout"], 2)
+        context = open_url.call_args.kwargs["context"]
+        self.assertFalse(context.check_hostname)
+        self.assertEqual(context.verify_mode, 0)
 
     async def test_model_discovery_validates_url(self) -> None:
         with self.assertRaisesRegex(ValueError, "API_BASE"):
@@ -75,6 +79,7 @@ class LiteLLMProviderTests(unittest.IsolatedAsyncioTestCase):
             api_key="test-key",
             api_base="https://example.test",
             timeout_seconds=2.5,
+            verify_tls=False,
             context_window=1000,
             completion_function=complete,
         )
@@ -89,6 +94,7 @@ class LiteLLMProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(received["api_key"], "test-key")
         self.assertEqual(received["api_base"], "https://example.test")
         self.assertEqual(received["timeout"], 2.5)
+        self.assertFalse(received["ssl_verify"])
         self.assertEqual(
             received["messages"],
             [{"role": "user", "content": "Hello"}],

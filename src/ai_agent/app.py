@@ -722,6 +722,11 @@ class AgentApp(App[None]):
         auto_compact = (
             f" | Auto-compact: {threshold:.0%}" if threshold is not None else ""
         )
+        tls = (
+            " | TLS: verification disabled"
+            if getattr(provider, "verify_tls", True) is False
+            else ""
+        )
         queue = f" | Queue: {len(self.prompt_queue)}" if self.prompt_queue else ""
         skills = f" | Skills: {self.skill_registry.enabled_count}"
         goal = (
@@ -732,7 +737,7 @@ class AgentApp(App[None]):
         )
         return (
             f"Provider: {provider.name} | Model: {provider.model} | Effort: {effort} | "
-            f"Context: {context}{compact_text}{auto_compact}{goal}{queue}{skills}"
+            f"Context: {context}{compact_text}{auto_compact}{tls}{goal}{queue}{skills}"
             f"{self._metrics_text()}"
         )
 

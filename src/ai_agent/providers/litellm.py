@@ -4,6 +4,7 @@ import importlib
 import json
 import math
 import os
+import ssl
 from time import monotonic
 from typing import Any
 from urllib.parse import urlsplit
@@ -24,6 +25,7 @@ async def fetch_litellm_models(
     api_base: str | None,
     api_key: str | None = None,
     timeout_seconds: float = 2.0,
+    verify_tls: bool = True,
 ) -> tuple[str, ...]:
     """Fetch model IDs exposed by a configured LiteLLM proxy."""
     if not api_base or not api_base.strip():
@@ -41,6 +43,7 @@ async def fetch_litellm_models(
         f"{base}/models",
         api_key,
         timeout_seconds,
+        verify_tls,
     )
 
 
@@ -48,12 +51,22 @@ def _fetch_litellm_models_sync(
     url: str,
     api_key: str | None,
     timeout_seconds: float,
+    verify_tls: bool = True,
 ) -> tuple[str, ...]:
     headers = {"Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     request = Request(url, headers=headers, method="GET")
-    with urlopen(request, timeout=timeout_seconds) as response:
+    context = None
+    if not verify_tls:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    with urlopen(
+        request,
+        timeout=timeout_seconds,
+        context=context,
+    ) as response:
         raw = response.read(MAX_MODEL_LIST_BYTES + 1)
     if len(raw) > MAX_MODEL_LIST_BYTES:
         raise RuntimeError("LiteLLM model list exceeded the 2 MiB limit")
@@ -87,6 +100,7 @@ class LiteLLMProvider:
         api_key: str | None = None,
         api_base: str | None = None,
         timeout_seconds: float = 2.0,
+        verify_tls: bool = True,
         context_window: int | None = None,
         completion_function: CompletionFunction | None = None,
         text_delta_handler: TextDeltaHandler | None = None,
@@ -103,6 +117,7 @@ class LiteLLMProvider:
         self.api_key = api_key
         self.api_base = api_base
         self.timeout_seconds = timeout_seconds
+        self.verify_tls = verify_tls
         self.context_window = context_window
         self.context_tokens = 0
         self.context_window_supported = context_window is not None
@@ -120,6 +135,7 @@ class LiteLLMProvider:
                 for message in messages
             ],
             "timeout": self.timeout_seconds,
+            "ssl_verify": self.verify_tls,
         }
         if self.effort:
             request["reasoning_effort"] = self.effort

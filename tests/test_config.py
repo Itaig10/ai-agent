@@ -16,6 +16,7 @@ class SettingsTests(unittest.TestCase):
         self.assertIsNone(settings.effort)
         self.assertIsNone(settings.context_window)
         self.assertEqual(settings.litellm_timeout_seconds, 2.0)
+        self.assertTrue(settings.litellm_verify_tls)
         self.assertEqual(settings.codex_path, "codex")
 
     @patch("ai_agent.config.load_dotenv")
@@ -28,6 +29,7 @@ class SettingsTests(unittest.TestCase):
             "AI_AGENT_LITELLM_API_KEY": "proxy-key",
             "AI_AGENT_LITELLM_API_BASE": "https://proxy.example.test",
             "AI_AGENT_LITELLM_TIMEOUT_SECONDS": "2.5",
+            "AI_AGENT_LITELLM_VERIFY_TLS": "false",
             "OPENAI_API_KEY": "openai-key",
             "CODEX_PATH": "/opt/codex",
         }
@@ -40,6 +42,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.context_window, 128_000)
         self.assertEqual(settings.litellm_api_key, "proxy-key")
         self.assertEqual(settings.litellm_timeout_seconds, 2.5)
+        self.assertFalse(settings.litellm_verify_tls)
         self.assertEqual(settings.openai_api_key, "openai-key")
         self.assertEqual(settings.codex_path, "/opt/codex")
 
@@ -72,6 +75,16 @@ class SettingsTests(unittest.TestCase):
                 ):
                     with self.assertRaisesRegex(ValueError, "LITELLM_TIMEOUT"):
                         Settings.from_env()
+
+    @patch("ai_agent.config.load_dotenv")
+    def test_invalid_litellm_tls_setting_is_rejected(self, _load: object) -> None:
+        with patch.dict(
+            os.environ,
+            {"AI_AGENT_LITELLM_VERIFY_TLS": "sometimes"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "VERIFY_TLS"):
+                Settings.from_env()
 
 
 if __name__ == "__main__":

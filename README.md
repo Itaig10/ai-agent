@@ -56,6 +56,17 @@ from `GET /models` in the background. Start typing in the model field to accept 
 matching model, or use `/models` to list the cached results and `/models refresh`
 to fetch them again.
 
+For a self-signed LiteLLM proxy certificate, TLS verification can be disabled
+only for LiteLLM discovery and completion requests:
+
+```bash
+export AI_AGENT_LITELLM_VERIFY_TLS=false
+```
+
+This is insecure and should only be used for a trusted private endpoint. Installing
+the proxy's CA certificate is safer for production use. The status bar displays
+`TLS: verification disabled` while this setting is active.
+
 Run the application:
 
 ```bash

@@ -40,6 +40,7 @@ def create_provider(
             api_key=settings.litellm_api_key,
             api_base=settings.litellm_api_base,
             timeout_seconds=settings.litellm_timeout_seconds,
+            verify_tls=settings.litellm_verify_tls,
             context_window=settings.context_window,
         )
 

@@ -16,6 +16,7 @@ class Settings:
     litellm_api_key: str | None
     litellm_api_base: str | None
     litellm_timeout_seconds: float
+    litellm_verify_tls: bool
     context_window: int | None
     codex_path: str
 
@@ -29,6 +30,9 @@ class Settings:
         litellm_timeout_text = os.getenv(
             "AI_AGENT_LITELLM_TIMEOUT_SECONDS", "2"
         ).strip()
+        litellm_verify_tls_text = os.getenv(
+            "AI_AGENT_LITELLM_VERIFY_TLS", "true"
+        ).strip().lower()
 
         if not provider:
             raise ValueError("AI_AGENT_PROVIDER cannot be empty")
@@ -52,6 +56,10 @@ class Settings:
             raise ValueError(
                 "AI_AGENT_LITELLM_TIMEOUT_SECONDS must be greater than zero"
             )
+        if litellm_verify_tls_text not in {"true", "false"}:
+            raise ValueError(
+                "AI_AGENT_LITELLM_VERIFY_TLS must be true or false"
+            )
         return cls(
             provider=provider,
             model=model,
@@ -60,6 +68,7 @@ class Settings:
             litellm_api_key=os.getenv("AI_AGENT_LITELLM_API_KEY"),
             litellm_api_base=os.getenv("AI_AGENT_LITELLM_API_BASE"),
             litellm_timeout_seconds=litellm_timeout_seconds,
+            litellm_verify_tls=litellm_verify_tls_text == "true",
             context_window=context_window,
             codex_path=os.getenv("CODEX_PATH", "codex").strip() or "codex",
         )

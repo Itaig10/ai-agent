@@ -141,6 +141,7 @@ class SkillProvider(FakeInteractiveProvider):
 class AgentAppTests(unittest.IsolatedAsyncioTestCase):
     async def test_tool_panel_and_controls_render(self) -> None:
         provider = FakeInteractiveProvider()
+        provider.verify_tls = False
         app = AgentApp(ChatSession(provider))
 
         async with app.run_test(size=(120, 40)) as pilot:
@@ -156,6 +157,7 @@ class AgentAppTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one("#effort", Select).value, "medium")
             status = app.query_one("#status", Static).render()
             self.assertIn("Context: 25.0%", str(status))
+            self.assertIn("TLS: verification disabled", str(status))
             self.assertTrue(callable(provider.activity_handler))
             self.assertTrue(callable(provider.approval_handler))
             self.assertTrue(callable(provider.plan_handler))

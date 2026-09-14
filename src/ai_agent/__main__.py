@@ -28,6 +28,7 @@ def main() -> None:
             api_base=settings.litellm_api_base,
             api_key=settings.litellm_api_key,
             timeout_seconds=settings.litellm_timeout_seconds,
+            verify_tls=settings.litellm_verify_tls,
         )
 
     AgentApp(
